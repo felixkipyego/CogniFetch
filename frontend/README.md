@@ -31,6 +31,8 @@ The dev server talks directly to the backend URL in `.env` — no proxy.
 |---|---|---|
 | `VITE_API_BASE_URL` | `http://localhost:8000` | CogniFetch backend base URL |
 
+> **Important:** `VITE_API_BASE_URL` is baked into the bundle at build time, not read at runtime. Set the correct value in `.env` before running `npm run build`, or the frontend will point to the wrong backend.
+
 ## Talking to the backend
 
 | What | Where |
