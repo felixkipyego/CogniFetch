@@ -65,7 +65,10 @@ OPENAI_API_BASE=https://api.openai.com/v1   # or your provider's base URL
 JWT_SECRET_KEY=some-long-random-string       # openssl rand -hex 32
 ```
 
-For local dev the other defaults in `.env.example` work as-is. If deploying beyond localhost, also set strong values for `POSTGRES_PASSWORD` and `MINIO_ROOT_PASSWORD` — Docker Compose reads them from `.env` to configure both services and the connection strings.
+For local dev the other defaults in `.env.example` work as-is. If deploying beyond localhost, also set:
+
+- `POSTGRES_PASSWORD` and `MINIO_ROOT_PASSWORD` — strong random passwords; Docker Compose reads these from `.env`
+- `CORS_ORIGINS` — JSON list of your frontend's origin(s), e.g. `["https://app.yourdomain.com"]`; without this the browser will block all API calls from your production frontend
 
 ### 2. Start the infrastructure
 

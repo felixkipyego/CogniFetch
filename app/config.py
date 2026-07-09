@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 30
     jwt_refresh_token_expire_days: int = 7
 
+    # CORS
+    cors_origins: list[str] = ["http://localhost:5173"]
+
     # App
     app_env: str = "development"
     log_level: str = "INFO"
