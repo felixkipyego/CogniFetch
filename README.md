@@ -57,18 +57,21 @@ The agent can answer directly from context, retrieve and grade chunks, rewrite t
 cp .env.example .env
 ```
 
-Open `.env` and fill in at minimum:
+Open `.env` and fill in:
 
 ```dotenv
 API_KEY=your-api-key
 OPENAI_API_BASE=https://api.openai.com/v1   # or your provider's base URL
-JWT_SECRET_KEY=some-long-random-string       # openssl rand -hex 32
+JWT_SECRET_KEY=...                           # openssl rand -hex 32
 ```
 
-For local dev the other defaults in `.env.example` work as-is. If deploying beyond localhost, also set:
+**Password consistency note:** `POSTGRES_PASSWORD` must match the password in `DATABASE_URL` and `SYNC_DATABASE_URL` — all three placeholders in `.env.example` are marked `YOUR_DB_PASSWORD` so you replace them together. Same pattern for `MINIO_ROOT_PASSWORD` and `S3_SECRET_ACCESS_KEY`.
 
-- `POSTGRES_PASSWORD` and `MINIO_ROOT_PASSWORD` — strong random passwords; Docker Compose reads these from `.env`
-- `CORS_ORIGINS` — JSON list of your frontend's origin(s), e.g. `["https://app.yourdomain.com"]`; without this the browser will block all API calls from your production frontend
+For local dev the remaining defaults work as-is. For production also set:
+
+- `POSTGRES_PASSWORD` / `MINIO_ROOT_PASSWORD` — strong random passwords (`openssl rand -hex 16`)
+- `CORS_ORIGINS` — JSON list of your frontend origin, e.g. `["https://yourdomain.com"]`
+- `APP_ENV=production`
 
 ### 2. Start the infrastructure
 
