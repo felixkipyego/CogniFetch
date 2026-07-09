@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cognifetch"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    # Web
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart",
+
+    # Auth
+    "python-jose[cryptography]",
+    "passlib[bcrypt]",
+    "bcrypt<4.0.0",
+
+    # DB / ORM
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg",
+    "psycopg[binary]",
+    "alembic",
+
+    # LangChain / LangGraph (pinned)
+    "langchain==0.3.27",
+    "langchain-core==0.3.79",
+    "langchain-openai==0.3.35",
+    "langchain-community==0.3.31",
+    "langgraph==0.6.6",
+    "langchain-postgres",
+
+    # Document parsing
+    "pypdf==5.4.0",
+    "docx2txt",
+    "beautifulsoup4",
+    "lxml",
+
+    # Object storage
+    "boto3",
+
+    # Config
+    "pydantic-settings>=2.0",
+    "email-validator>=2.0",
+
+    # Tokenizer
+    "tiktoken",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "httpx",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
