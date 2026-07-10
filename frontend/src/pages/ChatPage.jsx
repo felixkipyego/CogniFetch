@@ -44,7 +44,7 @@ export default function ChatPage() {
   const skipNextMessagesLoadRef = useRef(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
-  const [marginaliaDocId, setMarginaliaDocId] = useState(null);
+  const [marginaliaSource, setMarginaliaSource] = useState(null); // {docId, pages} | null
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Load sessions from API, fall back to localStorage
@@ -105,7 +105,7 @@ export default function ChatPage() {
   const selectSession = useCallback((id) => {
     if (id === activeSessionId) return;
     setActiveSessionId(id);
-    setMarginaliaDocId(null);
+    setMarginaliaSource(null);
     setSidebarOpen(false);
   }, [activeSessionId]);
 
@@ -178,7 +178,7 @@ export default function ChatPage() {
   const activeSession = sessions.find(s => s.id === activeSessionId) ?? null;
 
   return (
-    <div className={`app-shell${marginaliaDocId ? ' rail-open' : ''}${sidebarOpen ? ' sidebar-open' : ''}`}>
+    <div className={`app-shell${marginaliaSource ? ' rail-open' : ''}${sidebarOpen ? ' sidebar-open' : ''}`}>
       {sidebarOpen && (
         <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} aria-hidden />
       )}
@@ -197,15 +197,16 @@ export default function ChatPage() {
         isStreaming={isStreaming}
         loadingMessages={loadingMessages}
         onSendMessage={sendMessage}
-        onCitationClick={setMarginaliaDocId}
-        activeMarginaliaDocId={marginaliaDocId}
+        onCitationClick={(docId, pages) => setMarginaliaSource({ docId, pages })}
+        activeMarginaliaDocId={marginaliaSource?.docId ?? null}
         onMenuOpen={() => setSidebarOpen(true)}
       />
 
-      {marginaliaDocId && (
+      {marginaliaSource && (
         <MarginaliaRail
-          docId={marginaliaDocId}
-          onClose={() => setMarginaliaDocId(null)}
+          docId={marginaliaSource.docId}
+          pages={marginaliaSource.pages}
+          onClose={() => setMarginaliaSource(null)}
         />
       )}
     </div>

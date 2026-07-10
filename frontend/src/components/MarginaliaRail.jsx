@@ -21,9 +21,12 @@ function StatusRow({ status, errorMessage }) {
   );
 }
 
-export default function MarginaliaRail({ docId, onClose }) {
+export default function MarginaliaRail({ docId, pages = [], onClose }) {
   const { documents } = useDocuments();
   const doc = documents.find(d => d.id === docId);
+
+  // PyPDFLoader stores pages 0-indexed; display as 1-indexed to users.
+  const displayPages = pages.map(p => p + 1);
 
   return (
     <aside className="marginalia-rail" aria-label="Source document details">
@@ -49,6 +52,15 @@ export default function MarginaliaRail({ docId, onClose }) {
 
           <StatusRow status={doc.status} errorMessage={doc.error_message} />
 
+          {displayPages.length > 0 && (
+            <div className="rail-meta-row">
+              <span className="rail-meta-label">
+                {displayPages.length === 1 ? 'Page' : 'Pages'}
+              </span>
+              <span className="rail-meta-value">{displayPages.join(', ')}</span>
+            </div>
+          )}
+
           <div className="rail-meta-row">
             <span className="rail-meta-label">Uploaded</span>
             <span className="rail-meta-value">{formatDate(doc.created_at)}</span>
@@ -57,13 +69,6 @@ export default function MarginaliaRail({ docId, onClose }) {
           <div className="rail-meta-row">
             <span className="rail-meta-label">ID</span>
             <code className="rail-doc-id">{doc.id}</code>
-          </div>
-
-          <div className="rail-notice">
-            <p>
-              Citations currently reference document-level records. Chunk-level snippets
-              with page numbers are a planned backend enhancement.
-            </p>
           </div>
         </div>
       )}

@@ -71,7 +71,8 @@ async def _stream_agent_response(
 
     # 4. Stream graph events
     full_response: list[str] = []
-    cited_doc_ids: list[str] = []
+    # Maps document_id -> sorted list of page numbers (0-indexed from PyPDFLoader)
+    cited_pages: dict[str, list[int]] = {}
     used_fallback = False  # True when no_relevant_docs node fires
 
     try:
@@ -99,25 +100,35 @@ async def _stream_agent_response(
                         full_response.append(text)
                         yield f"event: delta\ndata: {json.dumps({'text': text})}\n\n"
 
-            # Capture which source documents were actually retrieved
+            # Capture which source documents (and pages) were actually retrieved
             elif kind == "on_retriever_end":
                 for doc in event["data"].get("output", []):
                     doc_id = doc.metadata.get("document_id")
-                    if doc_id and doc_id not in cited_doc_ids:
-                        cited_doc_ids.append(doc_id)
+                    if not doc_id:
+                        continue
+                    if doc_id not in cited_pages:
+                        cited_pages[doc_id] = []
+                    page = doc.metadata.get("page")  # present for PDFs (0-indexed)
+                    if page is not None and page not in cited_pages[doc_id]:
+                        cited_pages[doc_id].append(page)
 
         # Don't cite sources when the fallback "no info" path was taken
         if used_fallback:
-            cited_doc_ids = []
+            cited_pages = {}
+
+        cited_sources = [
+            {"document_id": doc_id, "pages": sorted(pages)}
+            for doc_id, pages in cited_pages.items()
+        ]
 
         # 5. Persist the completed assistant message
         final_content = "".join(full_response) or "(no response generated)"
         asst_msg = await service.add_message(
-            db, str(session.id), "assistant", final_content, cited_doc_ids or None
+            db, str(session.id), "assistant", final_content, cited_sources or None
         )
         yield (
             f"event: done\ndata: "
-            f"{json.dumps({'message_id': str(asst_msg.id), 'cited_chunk_ids': cited_doc_ids})}\n\n"
+            f"{json.dumps({'message_id': str(asst_msg.id), 'cited_chunk_ids': cited_sources})}\n\n"
         )
 
     except Exception as exc:

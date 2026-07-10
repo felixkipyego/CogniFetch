@@ -4,8 +4,16 @@ import { useDocuments } from '../contexts/DocumentsContext.jsx';
 
 marked.use({ gfm: true, breaks: true });
 
-function CitationChip({ index, docId, isActive, onClick }) {
+// Normalize source entries: old messages store plain doc ID strings; new ones
+// store {document_id, pages} objects. Both formats are handled here.
+function normalizeSource(source) {
+  if (typeof source === 'string') return { docId: source, pages: [] };
+  return { docId: source.document_id, pages: source.pages ?? [] };
+}
+
+function CitationChip({ index, source, isActive, onClick }) {
   const { documents } = useDocuments();
+  const { docId, pages } = normalizeSource(source);
   const doc = documents.find(d => d.id === docId);
   const filename = doc ? doc.filename : docId.slice(0, 8);
   const ext = filename.split('.').pop()?.toUpperCase() ?? '';
@@ -17,7 +25,7 @@ function CitationChip({ index, docId, isActive, onClick }) {
   return (
     <button
       className={`citation-chip${isActive ? ' citation-chip--active' : ''}`}
-      onClick={() => onClick(docId)}
+      onClick={() => onClick(docId, pages)}
       title={filename}
       aria-label={`Source ${index + 1}: ${filename}`}
     >
@@ -71,15 +79,18 @@ export default function MessageBubble({ message, onCitationClick, activeMarginal
           <div className="citations" role="list" aria-label="Sources">
             <p className="citations__label">Sources</p>
             <div className="citations__chips">
-              {cited_chunk_ids.map((docId, i) => (
-                <CitationChip
-                  key={docId}
-                  index={i}
-                  docId={docId}
-                  isActive={activeMarginaliaDocId === docId}
-                  onClick={onCitationClick}
-                />
-              ))}
+              {cited_chunk_ids.map((source, i) => {
+                const docId = typeof source === 'string' ? source : source.document_id;
+                return (
+                  <CitationChip
+                    key={docId}
+                    index={i}
+                    source={source}
+                    isActive={activeMarginaliaDocId === docId}
+                    onClick={onCitationClick}
+                  />
+                );
+              })}
             </div>
           </div>
         )}
