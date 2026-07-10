@@ -174,7 +174,7 @@ event: delta
 data: {"text":" several key topics..."}
 
 event: done
-data: {"message_id":"...","cited_chunk_ids":["doc-uuid-1",...]}
+data: {"message_id":"...","cited_chunk_ids":[{"document_id":"doc-uuid-1","pages":[4,7]},...]}
 ```
 
 ### Retrieve chat history

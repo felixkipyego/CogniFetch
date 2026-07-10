@@ -100,6 +100,11 @@ async def _stream_agent_response(
                         full_response.append(text)
                         yield f"event: delta\ndata: {json.dumps({'text': text})}\n\n"
 
+            # Reset on each new retrieval so only the final round's pages are kept.
+            # Without this, rewrite loops accumulate pages from every retry pass.
+            elif kind == "on_retriever_start":
+                cited_pages = {}
+
             # Capture which source documents (and pages) were actually retrieved
             elif kind == "on_retriever_end":
                 for doc in event["data"].get("output", []):
