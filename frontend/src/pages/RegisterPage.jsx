@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { apiJSON } from '../api/client.js';
 
 export default function RegisterPage() {
   const { register } = useAuth();
@@ -10,6 +11,9 @@ export default function RegisterPage() {
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [verificationSent, setVerificationSent] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendMessage, setResendMessage] = useState('');
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -20,13 +24,73 @@ export default function RegisterPage() {
     }
     setLoading(true);
     try {
-      await register(email, password);
-      navigate('/');
+      const needsVerification = await register(email, password);
+      if (needsVerification) {
+        setVerificationSent(true);
+      } else {
+        navigate('/');
+      }
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleResend() {
+    setResendLoading(true);
+    setResendMessage('');
+    try {
+      await apiJSON('/auth/resend-verification', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+        skipRefresh: true,
+      });
+      setResendMessage('Email resent! Check your inbox and spam folder.');
+    } catch {
+      setResendMessage('Could not resend. Please try again in a moment.');
+    } finally {
+      setResendLoading(false);
+    }
+  }
+
+  if (verificationSent) {
+    return (
+      <div className="auth-page">
+        <div className="auth-card">
+          <h1 className="auth-brand">CogniFetch</h1>
+          <p className="auth-subtitle">Check your email</p>
+
+          <div className="auth-notice">
+            <p>
+              We sent a verification link to <strong>{email}</strong>.
+              Click the link in that email to activate your account.
+            </p>
+            <p className="auth-notice__hint">
+              Don't see it? Check your <strong>spam or junk folder</strong> — verification
+              emails sometimes end up there.
+            </p>
+          </div>
+
+          {resendMessage && (
+            <div className="auth-info" role="status">{resendMessage}</div>
+          )}
+
+          <button
+            className="btn btn--secondary btn--full"
+            onClick={handleResend}
+            disabled={resendLoading}
+          >
+            {resendLoading ? 'Sending…' : 'Resend verification email'}
+          </button>
+
+          <p className="auth-footer">
+            Already verified?{' '}
+            <Link to="/login" className="auth-link">Sign in</Link>
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (

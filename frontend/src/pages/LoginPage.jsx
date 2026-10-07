@@ -9,6 +9,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const unverified = error.toLowerCase().includes('verify your email');
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -31,7 +32,17 @@ export default function LoginPage() {
         <p className="auth-subtitle">Sign in to your account</p>
 
         <form onSubmit={handleSubmit} className="auth-form" noValidate>
-          {error && <div className="auth-error" role="alert">{error}</div>}
+          {error && (
+            <div className="auth-error" role="alert">
+              {error}
+              {unverified && (
+                <p className="auth-error__hint">
+                  Check your <strong>spam or junk folder</strong> if you can't find the email.{' '}
+                  <Link to="/register" className="auth-link">Resend verification</Link>
+                </p>
+              )}
+            </div>
+          )}
 
           <label className="field">
             <span className="field__label">Email</span>

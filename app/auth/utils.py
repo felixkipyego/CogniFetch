@@ -34,6 +34,13 @@ def create_refresh_token(user_id: str) -> str:
     )
 
 
+def create_email_verification_token(user_id: str) -> str:
+    return _create_token(
+        {"sub": user_id, "type": "email_verify"},
+        timedelta(hours=24),
+    )
+
+
 def decode_token(token: str, expected_type: str = "access") -> dict:
     try:
         payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])

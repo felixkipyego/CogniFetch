@@ -30,6 +30,15 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: list[str] = ["http://localhost:5173"]
 
+    # Email verification (all optional — leave SMTP_HOST empty to skip verification)
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = "noreply@cognifetch.app"
+    smtp_use_tls: bool = True   # STARTTLS (port 587); set False for local mail servers
+    frontend_url: str = "http://localhost:5173"
+
     # App
     app_env: str = "development"
     log_level: str = "INFO"

@@ -195,6 +195,34 @@ body {
   padding: 0.625rem 0.75rem;
 }
 
+.auth-error__hint {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  opacity: 0.9;
+}
+
+.auth-notice {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+  line-height: 1.5;
+}
+.auth-notice p + p { margin-top: 0.5rem; }
+.auth-notice__hint { color: var(--slate); }
+
+.auth-info {
+  background: var(--surface-2);
+  border: 1px solid var(--sage);
+  border-radius: var(--radius-sm);
+  color: var(--sage);
+  font-size: 0.875rem;
+  padding: 0.625rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
 .auth-footer {
   margin-top: 1.5rem;
   text-align: center;

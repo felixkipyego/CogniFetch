@@ -1,5 +1,11 @@
 # CogniFetch
 
+## 🚀 [Live Demo](https://cognifetch.felixkipyego.com)
+
+**Try CogniFetch now — no setup required → [cognifetch.felixkipyego.com](https://cognifetch.felixkipyego.com)**
+
+---
+
 Full-stack agentic RAG built with **FastAPI** and **LangGraph**.
 
 Most RAG systems retrieve documents and answer immediately, regardless of whether what they found is actually relevant. CogniFetch runs a multi-step agent instead: it retrieves document chunks, **grades their relevance**, rewrites the query and retries if they fall short, and only generates an answer once it has evidence worth using. If it exhausts its retries, it tells you so rather than hallucinating.
@@ -11,7 +17,7 @@ Upload PDFs, Word documents, plain text, or HTML. Ask questions. Get answers gro
 | Backend (this README) | FastAPI · LangGraph · pgvector · MinIO | `docker-compose up` |
 | Frontend | React 18 · Vite · React Router | [`frontend/README.md`](frontend/README.md) |
 
-**Included out of the box:** JWT auth with refresh tokens · SSE streaming · Admin panel (swap model/API key at runtime without restart) · Full pytest suite · One-command Docker Compose setup · Works with any OpenAI-compatible provider
+**Included out of the box:** JWT auth with refresh tokens · Email verification · SSE streaming · Admin panel (swap model/API key at runtime without restart) · Full pytest suite · One-command Docker Compose setup · Works with any OpenAI-compatible provider
 
 ---
 
@@ -90,11 +96,12 @@ This starts:
 docker-compose exec api alembic upgrade head
 ```
 
-This applies all four migrations:
+This applies all migrations:
 - `0001` — enables `vector` extension, creates `users` table
 - `0002` — creates `documents` table and `documentstatus` enum
 - `0003` — creates `chat_sessions` and `chat_messages` tables
 - `0004` — adds `is_admin` to users, creates `system_config` table
+- `0005` — adds `is_verified` and `email_token` to users (email verification)
 
 The MinIO bucket (`cognifetch-docs`) is created automatically on first API startup.
 
@@ -235,6 +242,41 @@ app/
         ├── retriever.py # pgvector retriever scoped per session + user
         └── schemas.py   # AgentState, GradeDocuments structured-output schema
 ```
+
+---
+
+## Email verification
+
+Email verification is **opt-in** — it activates only when `SMTP_HOST` is set. Without it, users are auto-verified on registration and the flow is identical to before.
+
+When enabled:
+1. Registration sends a 24-hour verification link to the user's email.
+2. Unverified users are blocked from signing in with a clear message.
+3. Users can request a new link from the registration page if the first one expires.
+4. The verification email includes a reminder to check the spam/junk folder.
+
+**Configure SMTP in `.env`:**
+
+```dotenv
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=you@gmail.com
+SMTP_PASSWORD=your-app-password
+SMTP_FROM=noreply@yourdomain.com
+SMTP_USE_TLS=true
+FRONTEND_URL=https://yourdomain.com
+```
+
+For local testing without a real mail server, use [Mailpit](https://github.com/axllent/mailpit):
+
+```bash
+# docker run -p 1025:1025 -p 8025:8025 axllent/mailpit
+SMTP_HOST=localhost
+SMTP_PORT=1025
+SMTP_USE_TLS=false
+```
+
+Emails are viewable in the Mailpit web UI at http://localhost:8025.
 
 ---
 

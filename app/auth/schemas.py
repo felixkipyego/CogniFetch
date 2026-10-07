@@ -20,9 +20,14 @@ class RefreshRequest(BaseModel):
 class UserOut(BaseModel):
     id: uuid.UUID
     email: str
+    needs_verification: bool = False
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
 
 
 class TokenResponse(BaseModel):

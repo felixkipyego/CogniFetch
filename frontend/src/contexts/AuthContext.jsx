@@ -53,12 +53,15 @@ export function AuthProvider({ children }) {
   }, [_setTokens]);
 
   const register = useCallback(async (email, password) => {
-    await apiJSON('/auth/register', {
+    const data = await apiJSON('/auth/register', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
       skipRefresh: true,
     });
-    await login(email, password);
+    if (!data.needs_verification) {
+      await login(email, password);
+    }
+    return data.needs_verification ?? false;
   }, [login]);
 
   return (

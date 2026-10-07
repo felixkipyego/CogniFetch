@@ -44,6 +44,9 @@ dependencies = [
     "pydantic-settings>=2.0",
     "email-validator>=2.0",
 
+    # Email
+    "aiosmtplib>=3.0",
+
     # Tokenizer
     "tiktoken",
 ]
@@ -61,3 +64,5 @@ include = ["app*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
