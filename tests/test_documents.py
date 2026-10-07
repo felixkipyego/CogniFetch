@@ -27,7 +27,7 @@ TXT_FILE = ("test.txt", b"Hello CogniFetch " * 50, "text/plain")
 async def test_upload_document(client, auth_headers):
     with (
         patch("app.documents.storage.make_s3_client", return_value=_fake_s3_client()),
-        patch("app.documents.router.ingest_document", new_callable=AsyncMock),
+        patch("app.documents.router.ingest_document_task"),
     ):
         resp = await client.post(
             "/documents",
@@ -77,7 +77,7 @@ async def test_list_shows_own_documents_only(client, auth_headers, session_maker
     # Upload one document as the fixture user
     with (
         patch("app.documents.storage.make_s3_client", return_value=_fake_s3_client()),
-        patch("app.documents.router.ingest_document", new_callable=AsyncMock),
+        patch("app.documents.router.ingest_document_task"),
     ):
         up = await client.post("/documents", headers=auth_headers, files={"file": TXT_FILE})
     assert up.status_code == 202
@@ -97,7 +97,7 @@ async def test_list_shows_own_documents_only(client, auth_headers, session_maker
 async def test_get_document(client, auth_headers):
     with (
         patch("app.documents.storage.make_s3_client", return_value=_fake_s3_client()),
-        patch("app.documents.router.ingest_document", new_callable=AsyncMock),
+        patch("app.documents.router.ingest_document_task"),
     ):
         up = await client.post("/documents", headers=auth_headers, files={"file": TXT_FILE})
     doc_id = up.json()["id"]
@@ -118,7 +118,7 @@ async def test_get_document_wrong_owner(client, auth_headers):
     """Another user cannot fetch a document they don't own."""
     with (
         patch("app.documents.storage.make_s3_client", return_value=_fake_s3_client()),
-        patch("app.documents.router.ingest_document", new_callable=AsyncMock),
+        patch("app.documents.router.ingest_document_task"),
     ):
         up = await client.post("/documents", headers=auth_headers, files={"file": TXT_FILE})
     doc_id = up.json()["id"]
@@ -140,7 +140,7 @@ async def test_get_document_wrong_owner(client, auth_headers):
 async def test_delete_document(client, auth_headers):
     with (
         patch("app.documents.storage.make_s3_client", return_value=_fake_s3_client()),
-        patch("app.documents.router.ingest_document", new_callable=AsyncMock),
+        patch("app.documents.router.ingest_document_task"),
     ):
         up = await client.post("/documents", headers=auth_headers, files={"file": TXT_FILE})
     doc_id = up.json()["id"]

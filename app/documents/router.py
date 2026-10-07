@@ -1,13 +1,13 @@
 import mimetypes
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import User
 from app.dependencies import get_current_user, get_db, get_s3_client
 from app.documents import schemas, service
-from app.documents.ingestion import ingest_document
+from app.documents.tasks import ingest_document_task
 
 router = APIRouter()
 
@@ -22,7 +22,6 @@ _ALLOWED_MIME_TYPES = {
 
 @router.post("", response_model=schemas.DocumentOut, status_code=status.HTTP_202_ACCEPTED)
 async def upload_document(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -36,7 +35,7 @@ async def upload_document(
         )
 
     doc = await service.upload_document(db, file, str(current_user.id), s3_client)
-    background_tasks.add_task(ingest_document, str(doc.id))
+    ingest_document_task.delay(str(doc.id))
     return doc
 
 

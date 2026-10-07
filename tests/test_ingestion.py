@@ -3,17 +3,38 @@ Unit tests for the ingestion pipeline.
 
 These tests mock all external I/O (S3, OpenAI, PGVector) and focus on:
   - _run_pipeline: correct chunking, metadata tagging, return value
-  - ingest_document: status transitions and error handling
+  - ingest_document_task: status transitions, retry-then-succeed, and
+    permanent-failure-with-no-retry behavior
 """
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
+from botocore.exceptions import ClientError
 from langchain_core.documents import Document as LCDocument
-from sqlalchemy import select
 
-from app.db.models import Document, DocumentStatus
-from app.db.session import AsyncSessionLocal
+from app.db.models import Document, DocumentStatus, User
+
+
+@pytest.fixture(autouse=True)
+def _reset_vector_store_singleton():
+    """The PGVector singleton in ingestion.py must not leak a mock/instance
+    from one test into the next test's assertions."""
+    import app.documents.ingestion as ingestion_module
+
+    ingestion_module._vector_store = None
+    yield
+    ingestion_module._vector_store = None
+
+
+@pytest.fixture(autouse=True)
+def _use_test_sync_session(sync_sessionmaker):
+    """The task module's own SyncSessionLocal is bound to the real .env
+    SYNC_DATABASE_URL (the docker-internal `postgres` host) — point it at the
+    test database for the duration of these tests, same idea as conftest's
+    `client` fixture overriding FastAPI's get_db dependency."""
+    with patch("app.documents.tasks.SyncSessionLocal", sync_sessionmaker):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -67,71 +88,105 @@ def test_run_pipeline_tags_metadata(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# ingest_document  (async, uses real DB via AsyncSessionLocal)
+# ingest_document_task  (sync, uses the real test DB via sync_db/sync_engine)
 # ---------------------------------------------------------------------------
 
-async def _create_test_document(user_id: str) -> Document:
-    """Insert a pending Document directly, bypassing the HTTP layer."""
-    async with AsyncSessionLocal() as db:
-        doc = Document(
-            user_id=user_id,
-            filename="test.txt",
-            storage_path=f"{user_id}/{uuid.uuid4()}/test.txt",
-            mime_type="text/plain",
-            status=DocumentStatus.pending,
-        )
-        db.add(doc)
-        await db.commit()
-        await db.refresh(doc)
-        return doc
+def _create_test_user(sync_db) -> User:
+    user = User(
+        email=f"ingest-{uuid.uuid4()}@example.com",
+        hashed_password="not-a-real-hash",
+        is_verified=True,
+    )
+    sync_db.add(user)
+    sync_db.commit()
+    sync_db.refresh(user)
+    return user
 
 
-@pytest.mark.asyncio
-async def test_ingest_document_sets_ready(engine):
-    fake_user_id = str(uuid.uuid4())
-    doc = await _create_test_document(fake_user_id)
+def _create_test_document(sync_db) -> Document:
+    """Insert a pending Document (owned by a freshly created user) directly,
+    bypassing the HTTP layer."""
+    user = _create_test_user(sync_db)
+    doc = Document(
+        user_id=user.id,
+        filename="test.txt",
+        storage_path=f"{user.id}/{uuid.uuid4()}/test.txt",
+        mime_type="text/plain",
+        status=DocumentStatus.pending,
+    )
+    sync_db.add(doc)
+    sync_db.commit()
+    sync_db.refresh(doc)
+    return doc
+
+
+def test_ingest_document_task_sets_ready(sync_db, sync_engine):
+    doc = _create_test_document(sync_db)
 
     with (
-        patch("app.documents.ingestion.download_to_path"),
-        patch("app.documents.ingestion._run_pipeline", return_value=3),
-        patch("app.documents.ingestion.make_s3_client"),
-        patch("builtins.open"),
+        patch("app.documents.tasks.download_to_path"),
+        patch("app.documents.tasks._run_pipeline", return_value=3),
+        patch("app.documents.tasks.delete_document_chunks_sync"),
+        patch("app.documents.tasks.make_s3_client"),
         patch("os.path.exists", return_value=True),
         patch("os.unlink"),
-        patch("tempfile.NamedTemporaryFile") as mock_tmp,
     ):
-        mock_tmp.return_value.__enter__.return_value.name = "/tmp/fake.txt"
+        from app.documents.tasks import ingest_document_task
+        ingest_document_task.apply(args=[str(doc.id)])
 
-        from app.documents.ingestion import ingest_document
-        await ingest_document(str(doc.id))
-
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(Document).where(Document.id == doc.id))
-        updated = result.scalar_one()
-
+    sync_db.expire_all()
+    updated = sync_db.get(Document, doc.id)
     assert updated.status == DocumentStatus.ready
 
 
-@pytest.mark.asyncio
-async def test_ingest_document_sets_failed_on_error(engine):
-    fake_user_id = str(uuid.uuid4())
-    doc = await _create_test_document(fake_user_id)
+def test_ingest_document_task_sets_failed_on_permanent_error(sync_db, sync_engine):
+    """A non-transient error (e.g. a corrupt/unsupported file) should fail
+    immediately with no retry."""
+    doc = _create_test_document(sync_db)
 
     with (
-        patch("app.documents.ingestion.download_to_path", side_effect=RuntimeError("S3 down")),
-        patch("app.documents.ingestion.make_s3_client"),
+        patch("app.documents.tasks.download_to_path"),
+        patch("app.documents.tasks._run_pipeline", side_effect=ValueError("corrupt file")) as mock_pipeline,
+        patch("app.documents.tasks.delete_document_chunks_sync"),
+        patch("app.documents.tasks.make_s3_client"),
         patch("os.path.exists", return_value=True),
         patch("os.unlink"),
-        patch("tempfile.NamedTemporaryFile") as mock_tmp,
     ):
-        mock_tmp.return_value.__enter__.return_value.name = "/tmp/fake.txt"
+        from app.documents.tasks import ingest_document_task
+        ingest_document_task.apply(args=[str(doc.id)])
 
-        from app.documents.ingestion import ingest_document
-        await ingest_document(str(doc.id))
+    assert mock_pipeline.call_count == 1  # no retry for a non-transient exception
 
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(Document).where(Document.id == doc.id))
-        updated = result.scalar_one()
-
+    sync_db.expire_all()
+    updated = sync_db.get(Document, doc.id)
     assert updated.status == DocumentStatus.failed
-    assert "S3 down" in updated.error_message
+    assert "corrupt file" in updated.error_message
+
+
+def test_ingest_document_task_retries_then_succeeds(sync_db, sync_engine):
+    """A transient error (e.g. an S3 blip) should retry and succeed, with
+    chunks deleted before every attempt so a retry can't double-insert."""
+    doc = _create_test_document(sync_db)
+
+    transient_error = ClientError({"Error": {"Code": "500", "Message": "S3 blip"}}, "GetObject")
+
+    with (
+        patch("app.documents.tasks.download_to_path"),
+        patch(
+            "app.documents.tasks._run_pipeline",
+            side_effect=[transient_error, 2],
+        ) as mock_pipeline,
+        patch("app.documents.tasks.delete_document_chunks_sync") as mock_delete,
+        patch("app.documents.tasks.make_s3_client"),
+        patch("os.path.exists", return_value=True),
+        patch("os.unlink"),
+    ):
+        from app.documents.tasks import ingest_document_task
+        ingest_document_task.apply(args=[str(doc.id)])
+
+    assert mock_pipeline.call_count == 2
+    assert mock_delete.call_count == 2  # ran before every attempt, not just the first
+
+    sync_db.expire_all()
+    updated = sync_db.get(Document, doc.id)
+    assert updated.status == DocumentStatus.ready

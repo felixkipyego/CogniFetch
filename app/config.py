@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: list[str] = ["http://localhost:5173"]
 
+    # Task queue (document ingestion)
+    redis_url: str = "redis://localhost:6379/0"
+
     # Email verification (all optional — leave SMTP_HOST empty to skip verification)
     smtp_host: str = ""
     smtp_port: int = 587

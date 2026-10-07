@@ -1,8 +1,5 @@
-import asyncio
 import logging
-import os
-import tempfile
-from pathlib import Path
+import threading
 
 from langchain_community.document_loaders import (
     BSHTMLLoader,
@@ -13,14 +10,41 @@ from langchain_community.document_loaders import (
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from langchain_postgres import PGVector
-from sqlalchemy import select
 
 from app.config import settings
-from app.db.models import Document, DocumentStatus
-from app.db.session import AsyncSessionLocal
-from app.documents.storage import download_to_path, make_s3_client
 
 logger = logging.getLogger(__name__)
+
+_VECTOR_STORE_COLLECTION = "cognifetch_chunks"
+_vector_store: PGVector | None = None
+_vector_store_lock = threading.Lock()
+
+
+def _get_vector_store() -> PGVector:
+    """
+    Lazily build the PGVector store once per process, behind a lock.
+
+    Constructing PGVector(...) registers a SQLAlchemy declarative class against
+    a shared registry; building a fresh instance per call races when two
+    ingestion tasks run concurrently (`Table 'langchain_pg_collection' is
+    already defined for this MetaData instance`). A single lazily-built
+    singleton avoids the race entirely.
+    """
+    global _vector_store
+    if _vector_store is None:
+        with _vector_store_lock:
+            if _vector_store is None:
+                embeddings = OpenAIEmbeddings(
+                    model=settings.embedding_model,
+                    api_key=settings.api_key,
+                    base_url=settings.openai_api_base,
+                )
+                _vector_store = PGVector(
+                    embeddings=embeddings,
+                    collection_name=_VECTOR_STORE_COLLECTION,
+                    connection=settings.sync_database_url,
+                )
+    return _vector_store
 
 
 async def delete_document_chunks(document_id: str) -> None:
@@ -43,6 +67,26 @@ async def delete_document_chunks(document_id: str) -> None:
     logger.info("Deleted vector chunks for document %s", document_id)
 
 
+def delete_document_chunks_sync(document_id: str) -> None:
+    """Sync counterpart of delete_document_chunks, for use inside the Celery worker."""
+    from sqlalchemy import text
+    from app.db.sync_session import sync_engine
+
+    with sync_engine.connect() as conn:
+        conn.execute(
+            text("""
+                DELETE FROM langchain_pg_embedding
+                WHERE collection_id = (
+                    SELECT uuid FROM langchain_pg_collection WHERE name = :name
+                )
+                AND cmetadata->>'document_id' = :doc_id
+            """),
+            {"name": _VECTOR_STORE_COLLECTION, "doc_id": document_id},
+        )
+        conn.commit()
+    logger.info("Deleted vector chunks for document %s", document_id)
+
+
 _LOADER_MAP = {
     "application/pdf": PyPDFLoader,
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": Docx2txtLoader,
@@ -53,7 +97,7 @@ _LOADER_MAP = {
 
 
 def _run_pipeline(tmp_path: str, mime_type: str, document_id: str, user_id: str, filename: str) -> int:
-    """Load, split, embed, and store a document. Runs in a thread pool."""
+    """Load, split, embed, and store a document."""
     loader_cls = _LOADER_MAP.get(mime_type, TextLoader)
     raw_docs = loader_cls(tmp_path).load()
 
@@ -71,59 +115,6 @@ def _run_pipeline(tmp_path: str, mime_type: str, document_id: str, user_id: str,
             "filename": filename,
         })
 
-    embeddings = OpenAIEmbeddings(
-        model=settings.embedding_model,
-        api_key=settings.api_key,
-        base_url=settings.openai_api_base,
-    )
-    store = PGVector(
-        embeddings=embeddings,
-        collection_name="cognifetch_chunks",
-        connection=settings.sync_database_url,
-    )
+    store = _get_vector_store()
     store.add_documents(chunks)
     return len(chunks)
-
-
-async def ingest_document(document_id: str) -> None:
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(Document).where(Document.id == document_id))
-        doc = result.scalar_one_or_none()
-        if not doc:
-            logger.error("ingest_document: document %s not found", document_id)
-            return
-
-        doc.status = DocumentStatus.processing
-        await db.commit()
-
-        tmp_path: str | None = None
-        try:
-            suffix = Path(doc.filename).suffix or ".tmp"
-            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-                tmp_path = tmp.name
-
-            s3 = make_s3_client()
-            await asyncio.to_thread(download_to_path, s3, doc.storage_path, tmp_path)
-
-            chunk_count = await asyncio.to_thread(
-                _run_pipeline,
-                tmp_path,
-                doc.mime_type,
-                str(doc.id),
-                str(doc.user_id),
-                doc.filename,
-            )
-
-            doc.status = DocumentStatus.ready
-            await db.commit()
-            logger.info("Ingested document %s — %d chunks", document_id, chunk_count)
-
-        except Exception as exc:
-            logger.exception("Ingestion failed for document %s", document_id)
-            doc.status = DocumentStatus.failed
-            doc.error_message = str(exc)
-            await db.commit()
-
-        finally:
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)

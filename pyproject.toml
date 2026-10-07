@@ -40,6 +40,9 @@ dependencies = [
     # Object storage
     "boto3",
 
+    # Task queue
+    "celery[redis]>=5.4",
+
     # Config
     "pydantic-settings>=2.0",
     "python-dotenv>=1.0",

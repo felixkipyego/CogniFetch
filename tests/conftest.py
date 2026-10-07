@@ -15,7 +15,9 @@ import uuid
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import sessionmaker
 
 from app.db.base import Base
 from app.dependencies import get_db
@@ -24,6 +26,10 @@ from app.main import app
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL",
     "postgresql+asyncpg://cognifetch:cognifetch@localhost:5432/cognifetch_test",
+)
+TEST_SYNC_DATABASE_URL = os.getenv(
+    "TEST_SYNC_DATABASE_URL",
+    TEST_DATABASE_URL.replace("+asyncpg", "+psycopg"),
 )
 
 
@@ -45,6 +51,30 @@ async def engine():
 @pytest.fixture(scope="session")
 def session_maker(engine):
     return async_sessionmaker(engine, expire_on_commit=False)
+
+
+# ---------------------------------------------------------------------------
+# Sync engine/session for Celery-task tests — points at the same physical
+# test database as the async `engine` fixture (which owns schema create/drop),
+# just via psycopg instead of asyncpg.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="session")
+def sync_engine(engine):
+    eng = create_engine(TEST_SYNC_DATABASE_URL)
+    yield eng
+    eng.dispose()
+
+
+@pytest.fixture(scope="session")
+def sync_sessionmaker(sync_engine):
+    return sessionmaker(bind=sync_engine, expire_on_commit=False)
+
+
+@pytest.fixture
+def sync_db(sync_sessionmaker):
+    with sync_sessionmaker() as session:
+        yield session
 
 
 # ---------------------------------------------------------------------------

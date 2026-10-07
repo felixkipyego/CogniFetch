@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -29,7 +28,7 @@ async def _startup() -> None:
 
     from app.db.models import Document, DocumentStatus
     from app.db.session import AsyncSessionLocal
-    from app.documents.ingestion import ingest_document
+    from app.documents.tasks import ingest_document_task
     from sqlalchemy import select
 
     async with AsyncSessionLocal() as db:
@@ -41,7 +40,7 @@ async def _startup() -> None:
     if stuck:
         logger.warning("Re-queuing %d document(s) stuck in 'processing'", len(stuck))
         for doc in stuck:
-            asyncio.create_task(ingest_document(str(doc.id)))
+            ingest_document_task.delay(str(doc.id))
 
 
 @asynccontextmanager

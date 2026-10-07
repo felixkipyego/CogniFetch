@@ -88,7 +88,9 @@ docker-compose up -d
 This starts:
 - **postgres** (`pgvector/pgvector:pg16`) on port 5432
 - **minio** (S3-compatible storage) on port 9000 — console at http://localhost:9001
+- **redis** on port 6379 — Celery broker/result backend
 - **api** (FastAPI + uvicorn) on port 8000 with `--reload`
+- **celery-worker** — runs document ingestion as a retryable background task
 
 ### 3. Run database migrations
 
@@ -227,11 +229,13 @@ The test suite:
 app/
 ├── main.py              # FastAPI app, lifespan, middleware, error handler
 ├── config.py            # Typed settings (pydantic-settings)
+├── celery_app.py        # Celery app (Redis broker/backend)
 ├── dependencies.py      # get_db, get_current_user, get_s3_client
 ├── auth/                # JWT register / login / refresh / password change
 ├── admin/               # System config panel (API key, model settings)
-├── documents/           # Upload, CRUD, S3 storage, background ingestion
-│   └── ingestion.py     # load → split → embed → pgvector upsert
+├── documents/           # Upload, CRUD, S3 storage, async ingestion
+│   ├── ingestion.py     # load → split → embed → pgvector upsert (pure pipeline, no Celery)
+│   └── tasks.py         # Celery task: retries + idempotent re-run around ingestion.py
 └── chat/
     ├── router.py        # SSE streaming endpoint
     ├── service.py       # Session + message persistence
