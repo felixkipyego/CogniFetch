@@ -1,4 +1,9 @@
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Populates os.environ from .env so LangChain's tracing (LANGCHAIN_TRACING_V2 etc.)
+# picks it up directly — it reads the environment itself, not our Settings object.
+load_dotenv()
 
 
 class Settings(BaseSettings):

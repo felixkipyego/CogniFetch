@@ -1,0 +1,128 @@
+[
+  {
+    "id": "northwind-01",
+    "document": "northwind_employee_handbook.pdf",
+    "question": "How many PTO days do full-time employees accrue per year at Northwind Traders, and how much can they carry over?",
+    "expected_answer": "18 days of PTO per year, accrued at 1.5 days per month; up to 5 unused days can be carried over to the next year.",
+    "expected_pages": [1]
+  },
+  {
+    "id": "northwind-02",
+    "document": "northwind_employee_handbook.pdf",
+    "question": "What is Northwind's parental leave policy?",
+    "expected_answer": "12 weeks fully paid for the primary caregiver and 6 weeks fully paid for the secondary caregiver, available after 90 days of employment.",
+    "expected_pages": [1]
+  },
+  {
+    "id": "northwind-03",
+    "document": "northwind_employee_handbook.pdf",
+    "question": "How many days a week can an employee work remotely without manager pre-approval?",
+    "expected_answer": "Up to 3 days per week; fully remote arrangements need written approval from both the manager and HR.",
+    "expected_pages": [2]
+  },
+  {
+    "id": "northwind-04",
+    "document": "northwind_employee_handbook.pdf",
+    "question": "How much home office equipment reimbursement is an employee entitled to, and how often?",
+    "expected_answer": "Up to $500, once every 3 years, with a receipt submitted within 30 days of purchase.",
+    "expected_pages": [2]
+  },
+  {
+    "id": "aurora-01",
+    "document": "aurora_cloud_sla.pdf",
+    "question": "What uptime does Aurora Cloud guarantee for the Production API tier, and what happens if they miss it?",
+    "expected_answer": "99.9% monthly uptime is guaranteed; missing it triggers service credits of 10% (99.0-99.9%), 25% (95.0-99.0%), or 50% (below 95.0%) of monthly fees.",
+    "expected_pages": [1]
+  },
+  {
+    "id": "aurora-02",
+    "document": "aurora_cloud_sla.pdf",
+    "question": "How far in advance must Aurora Cloud announce scheduled maintenance for it to be excluded from uptime calculations?",
+    "expected_answer": "At least 72 hours in advance.",
+    "expected_pages": [1]
+  },
+  {
+    "id": "aurora-03",
+    "document": "aurora_cloud_sla.pdf",
+    "question": "What is the rate limit for the Pro tier, and what response code is returned when a rate limit is exceeded?",
+    "expected_answer": "600 requests per minute with no monthly cap; exceeding the limit returns HTTP 429 with a Retry-After header.",
+    "expected_pages": [2]
+  },
+  {
+    "id": "aurora-04",
+    "document": "aurora_cloud_sla.pdf",
+    "question": "What is the support response time target for a critical issue on the Enterprise tier?",
+    "expected_answer": "1 hour.",
+    "expected_pages": [2]
+  },
+  {
+    "id": "trailhead-01",
+    "document": "trailhead_analytics_faq.pdf",
+    "question": "What are Trailhead Analytics' pricing plans and what does each include?",
+    "expected_answer": "Starter at $49/month (up to 3 seats), Growth at $199/month (up to 15 seats), and Scale at custom pricing (unlimited seats, dedicated account manager).",
+    "expected_pages": [1]
+  },
+  {
+    "id": "trailhead-02",
+    "document": "trailhead_analytics_faq.pdf",
+    "question": "Is a credit card required for the Trailhead Analytics free trial, and how long is it?",
+    "expected_answer": "No credit card is required; the trial is 14 days.",
+    "expected_pages": [1]
+  },
+  {
+    "id": "trailhead-03",
+    "document": "trailhead_analytics_faq.pdf",
+    "question": "How long is raw event data retained on the Growth plan versus the Starter plan?",
+    "expected_answer": "12 months on the Growth plan versus 90 days on the Starter plan.",
+    "expected_pages": [2]
+  },
+  {
+    "id": "trailhead-04",
+    "document": "trailhead_analytics_faq.pdf",
+    "question": "Which plans support EU data residency, and is there an extra cost?",
+    "expected_answer": "Growth and Scale plans support EU data residency, at no extra cost.",
+    "expected_pages": [2]
+  },
+  {
+    "id": "greenleaf-01",
+    "document": "greenleaf_sustainability_report.pdf",
+    "question": "What is GreenLeaf Energy's emissions reduction target and how much had they achieved by the end of 2025?",
+    "expected_answer": "A 45% reduction from a 2019 baseline by end of 2030; they had achieved a 28% reduction by end of 2025.",
+    "expected_pages": [1]
+  },
+  {
+    "id": "greenleaf-02",
+    "document": "greenleaf_sustainability_report.pdf",
+    "question": "What percentage of GreenLeaf's operational energy came from renewable sources in 2025, and what is the 2028 target?",
+    "expected_answer": "62% in 2025 (up from 41% in 2022), targeting 90% by 2028.",
+    "expected_pages": [1]
+  },
+  {
+    "id": "greenleaf-03",
+    "document": "greenleaf_sustainability_report.pdf",
+    "question": "How much did freshwater withdrawal per unit of production decrease between 2022 and 2025, and why?",
+    "expected_answer": "19% decrease, due to closed-loop cooling system upgrades at 6 facilities.",
+    "expected_pages": [2]
+  },
+  {
+    "id": "greenleaf-04",
+    "document": "greenleaf_sustainability_report.pdf",
+    "question": "What percentage of tier-1 suppliers completed an environmental and labor practices audit in 2025, and what happened to suppliers with violations?",
+    "expected_answer": "100% of tier-1 suppliers were audited (up from 78% in 2023); 2 of the 14 audited suppliers were placed on a 90-day corrective action plan for water discharge violations.",
+    "expected_pages": [2]
+  },
+  {
+    "id": "out-of-corpus-01",
+    "document": null,
+    "question": "What is the maximum altitude a commercial airliner can fly at?",
+    "expected_answer": "I don't have information about that in your uploaded documents.",
+    "expected_pages": []
+  },
+  {
+    "id": "cross-doc-01",
+    "document": null,
+    "question": "Which company has a stricter uptime or compliance commitment: Aurora Cloud's API SLA or GreenLeaf's supplier audit rate?",
+    "expected_answer": "Open-ended comparison across documents; not a single-fact lookup. Useful as a Phase 2 multi-document synthesis test case rather than a single-answer grading case.",
+    "expected_pages": []
+  }
+]

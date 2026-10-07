@@ -280,6 +280,20 @@ Emails are viewable in the Mailpit web UI at http://localhost:8025.
 
 ---
 
+## Observability (tracing)
+
+The LangGraph agent can be traced in [LangSmith](https://smith.langchain.com) with **zero code changes** — LangChain's SDK reads tracing config directly from the environment.
+
+```dotenv
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=your-langsmith-api-key
+LANGCHAIN_PROJECT=cognifetch
+```
+
+With these set, every run of the graph — retrieval, grading, rewriting, generation — shows up as a trace in your LangSmith project, including per-node latency and token usage. Leave `LANGCHAIN_TRACING_V2` unset to disable; the app behaves identically either way.
+
+---
+
 ## Swapping the LLM provider
 
 Set `API_KEY`, `OPENAI_API_BASE`, `LLM_MODEL`, and `EMBEDDING_MODEL` in `.env`. Any provider that exposes an OpenAI-compatible API works without code changes. To switch to a non-compatible provider, replace `langchain_openai.ChatOpenAI` / `OpenAIEmbeddings` in `nodes.py`, `edges.py`, and `ingestion.py` with the appropriate LangChain class.
