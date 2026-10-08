@@ -6,12 +6,13 @@ from typing import AsyncGenerator
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat import schemas, service
-from app.chat.agent.graph import build_graph
+from app.chat.agent.orchestrator import build_orchestrator_graph
 from app.chat.agent.retriever import make_retriever_tool
-from app.db.models import ChatSession, User
+from app.db.models import ChatSession, Document, DocumentStatus, User
 from app.dependencies import get_current_user, get_db
 
 router = APIRouter()
@@ -49,6 +50,33 @@ async def list_messages(
     return await service.list_messages(db, str(session_id), str(current_user.id))
 
 
+async def _resolve_document_ids(db: AsyncSession, user_id: str, document_scope) -> list[str]:
+    """Resolve a session's document_scope to concrete, ready document IDs —
+    the orchestrator needs real IDs both to fan out multi-doc synthesis
+    retrieval and to decide which routes the supervisor may pick."""
+    query = select(Document.id).where(
+        Document.user_id == user_id, Document.status == DocumentStatus.ready
+    )
+    if document_scope:
+        query = query.where(Document.id.in_(document_scope))
+    result = await db.execute(query)
+    return [str(row[0]) for row in result.all()]
+
+
+# Nodes whose streamed tokens become SSE `delta` events. Distinctly named per
+# sub-agent so this bare-name match stays unambiguous across subgraphs.
+_STREAMING_ANSWER_NODES = (
+    "generate_answer",
+    "generate_query_or_respond",
+    "web_answer",
+    "synth_answer",
+)
+
+# Top-level subgraph-as-node names whose on_chain_end carries the final
+# merged state (including handled_by) for this turn.
+_SUBGRAPH_NODES = ("rag_subgraph", "web_research_subgraph", "multi_doc_synthesis_subgraph")
+
+
 async def _stream_agent_response(
     session: ChatSession,
     user_id: str,
@@ -65,45 +93,52 @@ async def _stream_agent_response(
         for m in db_messages
     ]
 
-    # 3. Build retriever tool (async_mode=True — safe to call directly)
+    # 3. Resolve document scope and build the orchestrator graph
+    resolved_document_ids = await _resolve_document_ids(db, user_id, session.document_scope)
     retriever_tool = make_retriever_tool(session.document_scope, user_id)
-    graph = build_graph(retriever_tool)
+    graph = build_orchestrator_graph(retriever_tool, user_id, resolved_document_ids)
 
     # 4. Stream graph events
     full_response: list[str] = []
     # Maps document_id -> sorted list of page numbers (0-indexed from PyPDFLoader)
     cited_pages: dict[str, list[int]] = {}
-    used_fallback = False  # True when no_relevant_docs node fires
+    handled_by: str | None = None
 
     try:
-        async for event in graph.astream_events({"messages": lc_messages}, version="v2"):
+        async for event in graph.astream_events(
+            {"messages": lc_messages, "resolved_document_ids": resolved_document_ids},
+            version="v2",
+        ):
             kind = event["event"]
             node = event.get("metadata", {}).get("langgraph_node", "")
 
             # Stream text tokens from LLM answer-producing nodes
-            if kind == "on_chat_model_stream" and node in (
-                "generate_answer",
-                "generate_query_or_respond",
-            ):
+            if kind == "on_chat_model_stream" and node in _STREAMING_ANSWER_NODES:
                 text = event["data"]["chunk"].content
                 if text:  # empty when the LLM is streaming a tool call instead of text
                     full_response.append(text)
                     yield f"event: delta\ndata: {json.dumps({'text': text})}\n\n"
 
-            # Emit the "no information found" message from the fallback node
+            # RAG found nothing relevant and escalated to web-research — any
+            # citations accumulated during those failed attempts are stale,
+            # since the eventual answer won't be grounded in them.
             elif kind == "on_chain_end" and node == "no_relevant_docs":
-                used_fallback = True
-                msgs = event["data"].get("output", {}).get("messages", [])
-                for msg in msgs:
-                    text = getattr(msg, "content", str(msg))
-                    if text:
-                        full_response.append(text)
-                        yield f"event: delta\ndata: {json.dumps({'text': text})}\n\n"
-
-            # Reset on each new retrieval so only the final round's pages are kept.
-            # Without this, rewrite loops accumulate pages from every retry pass.
-            elif kind == "on_retriever_start":
                 cited_pages = {}
+
+            # Capture which sub-agent produced the final answer
+            elif kind == "on_chain_end" and node in _SUBGRAPH_NODES:
+                output = event["data"].get("output")
+                if isinstance(output, dict) and output.get("handled_by"):
+                    handled_by = output["handled_by"]
+
+            # Reset at the start of the RAG subgraph's own retrieval rounds so
+            # only the final rewrite-loop pass's pages are kept; the synthesis
+            # subgraph's N-way fan-out must NOT reset between its own calls,
+            # or all but the last document's citations would be lost.
+            elif kind == "on_retriever_start":
+                checkpoint_ns = event.get("metadata", {}).get("langgraph_checkpoint_ns", "")
+                if checkpoint_ns.startswith("rag_subgraph"):
+                    cited_pages = {}
 
             # Capture which source documents (and pages) were actually retrieved
             elif kind == "on_retriever_end":
@@ -117,10 +152,6 @@ async def _stream_agent_response(
                     if page is not None and page not in cited_pages[doc_id]:
                         cited_pages[doc_id].append(page)
 
-        # Don't cite sources when the fallback "no info" path was taken
-        if used_fallback:
-            cited_pages = {}
-
         cited_sources = [
             {"document_id": doc_id, "pages": sorted(pages)}
             for doc_id, pages in cited_pages.items()
@@ -129,7 +160,7 @@ async def _stream_agent_response(
         # 5. Persist the completed assistant message
         final_content = "".join(full_response) or "(no response generated)"
         asst_msg = await service.add_message(
-            db, str(session.id), "assistant", final_content, cited_sources or None
+            db, str(session.id), "assistant", final_content, cited_sources or None, handled_by
         )
         yield (
             f"event: done\ndata: "

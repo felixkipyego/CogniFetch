@@ -8,7 +8,7 @@ from app.chat.agent.schemas import AgentState
 
 def build_graph(retriever_tool):
     """
-    Shape:
+    Shape (compiled as a subgraph — see app/chat/agent/orchestrator.py):
       START
         └─► generate_query_or_respond ──tools_condition──► retrieve (ToolNode)
                  ▲                                               │
@@ -18,7 +18,8 @@ def build_graph(retriever_tool):
              + rewrites left)                      │          max rewrites)
                                             generate_answer   no_relevant_docs
                                                    │                │
-                                                  END             END
+                                                  END    Command(graph=PARENT,
+                                                            goto=web_research_subgraph)
     """
     graph = StateGraph(AgentState)
 
@@ -46,6 +47,6 @@ def build_graph(retriever_tool):
     )
     graph.add_edge("rewrite_question", "generate_query_or_respond")
     graph.add_edge("generate_answer", END)
-    graph.add_edge("no_relevant_docs", END)
+    # no_relevant_docs always returns a Command(graph=PARENT, ...) — no static edge needed.
 
     return graph.compile()

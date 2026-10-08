@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     # Task queue (document ingestion)
     redis_url: str = "redis://localhost:6379/0"
 
+    # Web research sub-agent (leave blank to disable — unlike LangSmith this
+    # raises at use-time if set to a blank/invalid value, so callers must
+    # check this before constructing the Tavily tool, not just leave it unset)
+    tavily_api_key: str = ""
+
     # Email verification (all optional — leave SMTP_HOST empty to skip verification)
     smtp_host: str = ""
     smtp_port: int = 587

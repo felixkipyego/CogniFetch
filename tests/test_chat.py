@@ -112,7 +112,7 @@ async def test_send_message_streams_sse(client, auth_headers):
 
     with (
         patch("app.chat.router.make_retriever_tool"),
-        patch("app.chat.router.build_graph", return_value=mock_graph),
+        patch("app.chat.router.build_orchestrator_graph", return_value=mock_graph),
     ):
         resp = await client.post(
             f"/chat/sessions/{session_id}/messages",
@@ -146,7 +146,7 @@ async def test_send_message_persists_history(client, auth_headers):
 
     with (
         patch("app.chat.router.make_retriever_tool"),
-        patch("app.chat.router.build_graph", return_value=mock_graph),
+        patch("app.chat.router.build_orchestrator_graph", return_value=mock_graph),
     ):
         await client.post(
             f"/chat/sessions/{session_id}/messages",
@@ -161,3 +161,171 @@ async def test_send_message_persists_history(client, auth_headers):
     roles = [m["role"] for m in messages]
     assert "user" in roles
     assert "assistant" in roles
+
+
+# ---------------------------------------------------------------------------
+# Multi-agent orchestration (Phase 2)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route,node_name", [
+    ("rag", "rag_subgraph"),
+    ("web_research", "web_research_subgraph"),
+    ("multi_doc_synthesis", "multi_doc_synthesis_subgraph"),
+])
+async def test_send_message_records_handled_by(client, auth_headers, route, node_name):
+    """Whichever sub-agent subgraph actually answers, its handled_by tag
+    should be the one persisted on the assistant message."""
+    session_id = await _make_session(client, auth_headers)
+
+    async def fake_astream_events(*args, **kwargs):
+        yield {
+            "event": "on_chat_model_stream",
+            "metadata": {"langgraph_node": "generate_answer"},
+            "data": {"chunk": MagicMock(content="answer")},
+        }
+        yield {
+            "event": "on_chain_end",
+            "metadata": {"langgraph_node": node_name},
+            "data": {"output": {"handled_by": route, "messages": []}},
+        }
+
+    mock_graph = MagicMock()
+    mock_graph.astream_events = fake_astream_events
+
+    with (
+        patch("app.chat.router.make_retriever_tool"),
+        patch("app.chat.router.build_orchestrator_graph", return_value=mock_graph),
+    ):
+        await client.post(
+            f"/chat/sessions/{session_id}/messages",
+            json={"content": "question"},
+            headers=auth_headers,
+        )
+
+    hist = await client.get(f"/chat/sessions/{session_id}/messages", headers=auth_headers)
+    assistant_msgs = [m for m in hist.json() if m["role"] == "assistant"]
+    assert assistant_msgs[-1]["handled_by"] == route
+
+
+@pytest.mark.asyncio
+async def test_escalation_from_rag_to_web_research(client, auth_headers):
+    """RAG finds nothing relevant and hands off to web-research — the final
+    message should carry the escalation's handled_by tag, the streamed
+    answer should come from web-research's own node, and stale citations
+    from RAG's failed retrieval attempts should be discarded."""
+    session_id = await _make_session(client, auth_headers)
+    fake_doc_id = str(uuid.uuid4())
+
+    async def fake_astream_events(*args, **kwargs):
+        yield {
+            "event": "on_retriever_start",
+            "metadata": {
+                "langgraph_node": "retrieve",
+                "langgraph_checkpoint_ns": "rag_subgraph:abc|retrieve:def",
+            },
+            "data": {},
+        }
+        fake_doc = MagicMock()
+        fake_doc.metadata = {"document_id": fake_doc_id, "page": 0}
+        yield {
+            "event": "on_retriever_end",
+            "metadata": {"langgraph_node": "retrieve"},
+            "data": {"output": [fake_doc]},
+        }
+        # no_relevant_docs now always returns a Command, not {"messages": [...]}
+        yield {
+            "event": "on_chain_end",
+            "metadata": {"langgraph_node": "no_relevant_docs"},
+            "data": {"output": MagicMock()},
+        }
+        yield {
+            "event": "on_chat_model_stream",
+            "metadata": {"langgraph_node": "web_answer"},
+            "data": {"chunk": MagicMock(content="Web answer text")},
+        }
+        yield {
+            "event": "on_chain_end",
+            "metadata": {"langgraph_node": "web_research_subgraph"},
+            "data": {"output": {"handled_by": "rag_escalated_web_research", "messages": []}},
+        }
+
+    mock_graph = MagicMock()
+    mock_graph.astream_events = fake_astream_events
+
+    with (
+        patch("app.chat.router.make_retriever_tool"),
+        patch("app.chat.router.build_orchestrator_graph", return_value=mock_graph),
+    ):
+        resp = await client.post(
+            f"/chat/sessions/{session_id}/messages",
+            json={"content": "obscure question"},
+            headers=auth_headers,
+        )
+
+    assert "Web answer text" in resp.text
+
+    hist = await client.get(f"/chat/sessions/{session_id}/messages", headers=auth_headers)
+    assistant_msgs = [m for m in hist.json() if m["role"] == "assistant"]
+    last = assistant_msgs[-1]
+    assert last["handled_by"] == "rag_escalated_web_research"
+    assert last["cited_chunk_ids"] is None  # stale RAG citations discarded on escalation
+
+
+def test_allowed_routes_by_document_count():
+    from app.chat.agent.orchestrator import _allowed_routes
+
+    assert _allowed_routes([]) == ["web_research"]
+    assert _allowed_routes(["doc-a"]) == ["rag", "web_research"]
+    assert _allowed_routes(["doc-a", "doc-b"]) == ["rag", "web_research", "multi_doc_synthesis"]
+
+
+def test_classify_route_single_allowed_route_short_circuits():
+    """With only one legal route, no LLM call should be needed at all."""
+    from app.chat.agent.supervisor import classify_route
+
+    with patch("app.chat.agent.supervisor.ChatOpenAI") as MockLLM:
+        result = classify_route("anything", ["web_research"])
+
+    MockLLM.assert_not_called()
+    assert result == "web_research"
+
+
+def test_classify_route_uses_structured_output_when_multiple_allowed():
+    from app.chat.agent import supervisor as supervisor_module
+
+    fake_decision = MagicMock(route="web_research")
+
+    with patch("app.chat.agent.supervisor.ChatOpenAI") as MockLLM:
+        MockLLM.return_value.with_structured_output.return_value.invoke.return_value = fake_decision
+        result = supervisor_module.classify_route("what's the weather", ["rag", "web_research"])
+
+    assert result == "web_research"
+
+
+def test_web_search_graceful_when_tavily_key_missing():
+    from langchain_core.messages import HumanMessage
+    from app.chat.agent.subagents.web_research import web_search
+
+    with patch("app.chat.agent.subagents.web_research.settings") as mock_settings:
+        mock_settings.tavily_api_key = ""
+        result = web_search({"messages": [HumanMessage(content="anything")]})
+
+    assert "not configured" in result["messages"][0].content.lower()
+
+
+def test_web_answer_tags_unavailable_when_tavily_key_missing():
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+    from app.chat.agent.subagents.web_research import web_answer
+
+    with (
+        patch("app.chat.agent.subagents.web_research.settings") as mock_settings,
+        patch("app.chat.agent.subagents.web_research._llm") as mock_llm,
+    ):
+        mock_settings.tavily_api_key = ""
+        mock_llm.return_value.invoke.return_value = AIMessage(content="no results")
+        result = web_answer({
+            "messages": [HumanMessage(content="q"), SystemMessage(content="not configured")],
+        })
+
+    assert result["handled_by"] == "web_research_unavailable"

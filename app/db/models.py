@@ -66,4 +66,5 @@ class ChatMessage(Base):
     role = Column(String(16), nullable=False)        # "user" | "assistant"
     content = Column(Text, nullable=False)
     cited_chunk_ids = Column(JSONB, nullable=True)   # list of chunk ID strings
+    handled_by = Column(String(64), nullable=True)   # which sub-agent produced this message
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

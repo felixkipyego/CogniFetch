@@ -62,12 +62,14 @@ async def add_message(
     role: str,
     content: str,
     cited_chunk_ids: Optional[list] = None,
+    handled_by: Optional[str] = None,
 ) -> ChatMessage:
     msg = ChatMessage(
         session_id=session_id,
         role=role,
         content=content,
         cited_chunk_ids=cited_chunk_ids,
+        handled_by=handled_by,
     )
     db.add(msg)
     await db.commit()

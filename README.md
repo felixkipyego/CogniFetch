@@ -17,13 +17,24 @@ Upload PDFs, Word documents, plain text, or HTML. Ask questions. Get answers gro
 | Backend (this README) | FastAPI · LangGraph · pgvector · MinIO | `docker-compose up` |
 | Frontend | React 18 · Vite · React Router | [`frontend/README.md`](frontend/README.md) |
 
-**Included out of the box:** JWT auth with refresh tokens · Email verification · SSE streaming · Admin panel (swap model/API key at runtime without restart) · Full pytest suite · One-command Docker Compose setup · Works with any OpenAI-compatible provider
+**Included out of the box:** JWT auth with refresh tokens · Email verification · Multi-agent orchestration (supervisor + RAG/web-research/multi-doc-synthesis sub-agents) · SSE streaming · Admin panel (swap model/API key at runtime without restart) · Full pytest suite · One-command Docker Compose setup · Works with any OpenAI-compatible provider
 
 ---
 
 ## How the agent works
 
-Each chat message enters a LangGraph state machine:
+Each chat message is routed by a supervisor to one of three sub-agents — a real multi-agent graph (LangGraph subgraphs + `Command` handoffs), not one big conditional-edge tree:
+
+```
+START ─► supervisor ──Command.goto──► rag_subgraph
+                     │
+                     ├──► web_research_subgraph  (Tavily search)
+                     │
+                     └──► multi_doc_synthesis_subgraph  (fans out retrieval across
+                                                           every document in scope)
+```
+
+**`rag_subgraph`** — the original single-document-corpus graph, unchanged:
 
 ```
 START
@@ -40,10 +51,12 @@ START
      │             │                │
 generate_answer  rewrite_question  no_relevant_docs
      │             │                │
-    END     generate_query_or_respond  END
+    END     generate_query_or_respond  │
+                                        ▼
+                        Command(graph=PARENT, goto=web_research_subgraph)
 ```
 
-The agent can answer directly from context, retrieve and grade chunks, rewrite the question and retry, or tell the user no relevant documents were found.
+The supervisor picks a route before any retrieval happens (no documents uploaded → web research only; one document → RAG or web research; two or more → RAG, web research, or cross-document synthesis). If RAG tries and comes up empty after all its rewrites, it hands off to the web-research sub-agent itself via `Command(graph=Command.PARENT, ...)` — a real escalation across the subgraph boundary, not just the supervisor's upfront routing. Each assistant message records which sub-agent actually produced it (`handled_by` on `ChatMessage`).
 
 ---
 
@@ -104,6 +117,7 @@ This applies all migrations:
 - `0003` — creates `chat_sessions` and `chat_messages` tables
 - `0004` — adds `is_admin` to users, creates `system_config` table
 - `0005` — adds `is_verified` and `email_token` to users (email verification)
+- `0006` — adds `handled_by` to chat_messages (multi-agent sub-agent attribution)
 
 The MinIO bucket (`cognifetch-docs`) is created automatically on first API startup.
 
@@ -218,8 +232,8 @@ pytest -v
 The test suite:
 - **`test_auth`** — register, login, refresh, duplicate-email guard, bad credentials, protected-route enforcement
 - **`test_documents`** — upload, list (user-scoped), get, wrong-owner 404, delete; S3 and background ingestion are mocked
-- **`test_ingestion`** — unit tests for `_run_pipeline` (chunking, metadata tagging) and `ingest_document` status transitions (pending → ready, pending → failed); LangChain and S3 are mocked
-- **`test_chat`** — session CRUD, message history, SSE stream structure, message persistence after streaming; LangGraph is mocked
+- **`test_ingestion`** — unit tests for `_run_pipeline` (chunking, metadata tagging) and `ingest_document_task` status transitions, including the retry-then-succeed and permanent-failure paths; LangChain, S3, and Celery's broker are not needed (`Task.apply()` runs the task in-process)
+- **`test_chat`** — session CRUD, message history, SSE stream structure, message persistence after streaming, supervisor routing per sub-agent, and the RAG-to-web-research escalation path; LangGraph/LLM calls are mocked
 
 ---
 
@@ -240,11 +254,16 @@ app/
     ├── router.py        # SSE streaming endpoint
     ├── service.py       # Session + message persistence
     └── agent/
-        ├── graph.py     # LangGraph StateGraph definition
-        ├── nodes.py     # generate_query_or_respond, rewrite_question, generate_answer, no_relevant_docs
-        ├── edges.py     # grade_documents conditional edge
-        ├── retriever.py # pgvector retriever scoped per session + user
-        └── schemas.py   # AgentState, GradeDocuments structured-output schema
+        ├── orchestrator.py # Top-level graph: supervisor + 3 sub-agent subgraphs
+        ├── supervisor.py   # Structured-output route classifier + Command-based routing
+        ├── graph.py        # RAG sub-agent StateGraph (compiled as a subgraph)
+        ├── nodes.py        # generate_query_or_respond, rewrite_question, generate_answer, no_relevant_docs
+        ├── edges.py        # grade_documents conditional edge
+        ├── retriever.py    # pgvector retriever(s) scoped per session + user
+        ├── schemas.py      # AgentState, OrchestratorState, RouteDecision, etc.
+        └── subagents/
+            ├── web_research.py        # Tavily search + answer sub-agent
+            └── multi_doc_synthesis.py # Per-document fan-out retrieval + compare/contrast sub-agent
 ```
 
 ---
@@ -281,6 +300,18 @@ SMTP_USE_TLS=false
 ```
 
 Emails are viewable in the Mailpit web UI at http://localhost:8025.
+
+---
+
+## Multi-agent orchestration
+
+A supervisor routes each message to one of three sub-agents — see "How the agent works" above for the graph shape. The web-research sub-agent needs a Tavily key:
+
+```dotenv
+TAVILY_API_KEY=your-tavily-api-key
+```
+
+Get a free key at [tavily.com](https://tavily.com) (1,000 searches/month, no credit card required). Unlike `LANGCHAIN_API_KEY` above, this isn't silently inert when unset — the Tavily client itself raises if asked to search without a key. The web-research sub-agent checks for the key before calling Tavily and replies that web research isn't configured instead of raising, so the app works fully without this key — out-of-corpus questions just get a "not configured" response rather than a real web answer.
 
 ---
 

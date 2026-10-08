@@ -28,6 +28,7 @@ class MessageOut(BaseModel):
     role: str
     content: str
     cited_chunk_ids: Optional[List] = None  # list of {document_id, pages} objects
+    handled_by: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

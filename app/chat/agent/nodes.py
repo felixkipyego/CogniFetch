@@ -1,5 +1,6 @@
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from langgraph.types import Command
 
 from app import runtime_config
 from app.chat.agent.schemas import AgentState
@@ -61,18 +62,26 @@ def rewrite_question(state: AgentState):
 
 def generate_answer(state: AgentState):
     messages = [_GROUNDING_SYSTEM] + list(state["messages"])
-    return {"messages": [_llm(streaming=True).invoke(messages)]}
-
-
-def no_relevant_docs(state: AgentState):
-    human_msg = next((m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)), None)
-    topic = human_msg.content.strip() if human_msg else "that topic"
     return {
-        "messages": [
-            AIMessage(content=(
-                f"I don't have information about that in your uploaded documents. "
-                f"The documents you've provided don't appear to contain anything relevant to: \"{topic}\". "
-                f"Please upload documents that cover this topic, or ask something related to your existing documents."
-            ))
-        ]
+        "messages": [_llm(streaming=True).invoke(messages)],
+        "handled_by": "rag",
     }
+
+
+def no_relevant_docs(state: AgentState) -> Command:
+    """
+    No relevant documents after all rewrites — hand off to the web-research
+    sub-agent instead of just refusing, a real escalation across the
+    subgraph boundary (not just the supervisor's upfront routing).
+
+    Deliberately typed as bare `Command` (not `Command[Literal["web_research_subgraph"]]`):
+    LangGraph infers this subgraph's own compile-time edge validation from
+    that type parameter, and "web_research_subgraph" is a sibling in the
+    PARENT graph, not a node in this one — annotating the literal destination
+    here would make this subgraph fail to compile standalone.
+    """
+    return Command(
+        graph=Command.PARENT,
+        goto="web_research_subgraph",
+        update={"handled_by": "rag_escalated_web_research"},
+    )

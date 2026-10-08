@@ -30,6 +30,7 @@ dependencies = [
     "langchain-community==0.3.31",
     "langgraph==0.6.6",
     "langchain-postgres",
+    "langchain-tavily>=0.2.13,<0.2.18",
 
     # Document parsing
     "pypdf==5.4.0",
