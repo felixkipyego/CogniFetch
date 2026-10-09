@@ -1,13 +1,17 @@
-# Eval corpus (Phase 0 baseline)
+# Eval corpus (golden set, Phase 3)
 
-Frozen fixtures for the evaluation harness planned in Phase 3 of the enhancement roadmap. Nothing here is wired into the app or test suite yet — this is just the fixed input data so that later graph/prompt changes (Phases 1-2) have a stable baseline to diff against, rather than re-picking documents and questions after the fact.
+Fixtures for the evaluation harness in `app/evals/` (see `ENHANCEMENT_ROADMAP.md` Phase 3). `python -m app.evals.run` (or `make eval`) runs this set against the live orchestrator graph and prints a scorecard — see the top-level README's "Evaluation" section for current scores.
 
 ## Contents
 
 - `corpus/*.pdf` — 4 short synthetic documents, each 2 pages, covering a distinct fictional topic (HR policy, a cloud SLA, a SaaS FAQ, a sustainability report). Generated, not sourced from the web, so there are no licensing concerns about committing them to a public repo. Each document's facts are deliberately unambiguous and page-scoped, so a correct retrieval/citation should point at one specific page.
-- `qa_pairs.json` — 18 question/expected-answer pairs referencing those documents, plus:
-  - `out-of-corpus-01`: a question with no answer in any document, to check the agent correctly says so instead of hallucinating.
-  - `cross-doc-01`: a comparison question spanning two documents, flagged as a Phase 2 multi-document-synthesis test case rather than a single-fact grading case.
+- `qa_pairs.json` — 25 question/expected-answer/expected-citation triples:
+  - `*-01` through `*-05` per document (20 total): single-fact lookups, each citing exactly one page.
+  - `out-of-corpus-01`: a general-knowledge question with no plausible connection to any uploaded document — should route to `web_research`, not get an ungrounded RAG answer.
+  - `out-of-corpus-02`: a harder grounding trap — the company name (Northwind) IS in the corpus, so the supervisor should route to `rag`, but the handbook excerpt never covers the topic asked (dress code). Tests that RAG retrieves, finds nothing on-topic, and refuses rather than inferring a plausible-sounding answer. This directly targets the grounding gap found while measuring the Phase 0 baseline.
+  - `cross-doc-01/02/03`: real multi-document comparison questions, each citing two documents, scored by the `multi_doc_synthesis` route added in Phase 2. (The original Phase 0 placeholder here, `cross-doc-01`, was flagged as "not gradable yet" since that sub-agent didn't exist; it does now, so these are real graded cases.)
+
+Each case's schema: `id`, `documents` (filenames the answer should cite, `[]` for out-of-corpus), `question`, `expected_answer`, `expected_citations` (list of `{document, pages}`).
 
 ## Why these particular documents
 
@@ -19,4 +23,4 @@ The PDFs were generated with `fpdf2` from a one-off script (not checked into the
 
 ## Status
 
-Candidate set for Phase 0. Phase 3 expands this to the full 20-40 pair golden set with automated retrieval precision/recall, LLM-as-judge faithfulness scoring, and citation-accuracy checks — see `ENHANCEMENT_ROADMAP.md`.
+Golden set for Phase 3, 25 pairs (within the roadmap's 20-40 target). Scored on four dimensions by `app/evals/`: retrieval precision/recall (deterministic, page-overlap based), answer correctness, faithfulness, and citation accuracy (all three via LLM-as-judge, same structured-output pattern as `grade_documents`).

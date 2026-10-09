@@ -1127,6 +1127,40 @@ body {
 }
 .admin-badge--you { background: var(--sage-dim); color: var(--sage); border: 1px solid var(--sage-border); }
 
+/* ─── Admin metrics ──────────────────────────────────────────── */
+.admin-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+.admin-stat-card {
+  background: var(--panel-alt);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: var(--radius);
+  padding: 0.875rem 1rem;
+}
+.admin-stat-card__label {
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--slate);
+  margin-bottom: 0.35rem;
+}
+.admin-stat-card__value {
+  font-family: var(--font-mono);
+  font-size: 1.25rem;
+  color: var(--paper);
+}
+.admin-subheading {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--slate);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 1.75rem 0 0.75rem;
+}
+
 .admin-toggle {
   font-family: var(--font-mono);
   font-size: 0.75rem;

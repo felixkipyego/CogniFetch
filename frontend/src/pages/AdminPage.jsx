@@ -231,6 +231,133 @@ function ConfigTab() {
   );
 }
 
+/* ─── Metrics tab ────────────────────────────────────────────── */
+
+function fmtCost(v) {
+  return v === null || v === undefined ? '—' : `$${v.toFixed(4)}`;
+}
+function fmtMs(v) {
+  return v === null || v === undefined ? '—' : `${Math.round(v).toLocaleString()} ms`;
+}
+
+function StatCard({ label, value }) {
+  return (
+    <div className="admin-stat-card">
+      <div className="admin-stat-card__label">{label}</div>
+      <div className="admin-stat-card__value">{value}</div>
+    </div>
+  );
+}
+
+function MetricsTab() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      setData(await apiJSON('/admin/metrics'));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <div className="admin-loading">Loading metrics…</div>;
+  if (error) return <div className="admin-error">{error}</div>;
+  if (!data || data.window_run_count === 0) {
+    return (
+      <div className="admin-section">
+        <div className="admin-section-header">
+          <h2 className="admin-section-title">Metrics</h2>
+          <button className="btn btn--ghost btn--sm" onClick={load}>Refresh</button>
+        </div>
+        <p className="admin-section-desc">No agent runs recorded yet — send a chat message to populate this.</p>
+      </div>
+    );
+  }
+
+  const { overall, by_route, avg_node_latency_ms } = data;
+
+  return (
+    <div className="admin-section">
+      <div className="admin-section-header">
+        <h2 className="admin-section-title">Metrics <span className="admin-count">last {data.window_run_count} runs</span></h2>
+        <button className="btn btn--ghost btn--sm" onClick={load}>Refresh</button>
+      </div>
+      <p className="admin-section-desc">
+        Token, cost, and latency stats for the most recent agent runs (real chat traffic and eval harness runs alike).
+        Cost is a best-effort estimate from a static OpenAI rate table — unpriced or gateway-routed models show as unknown
+        rather than $0.
+      </p>
+
+      <div className="admin-stat-grid">
+        <StatCard label="p50 latency" value={fmtMs(overall.p50_latency_ms)} />
+        <StatCard label="p95 latency" value={fmtMs(overall.p95_latency_ms)} />
+        <StatCard label="Prompt tokens" value={overall.prompt_tokens.toLocaleString()} />
+        <StatCard label="Completion tokens" value={overall.completion_tokens.toLocaleString()} />
+        <StatCard label="Total cost" value={fmtCost(overall.total_cost_usd)} />
+        <StatCard label="Unpriced runs" value={overall.runs_with_unknown_cost} />
+      </div>
+
+      <h3 className="admin-subheading">By route</h3>
+      <div className="admin-table-wrap">
+        <table className="admin-table">
+          <thead>
+            <tr>
+              <th>Route</th>
+              <th>Runs</th>
+              <th>p50</th>
+              <th>p95</th>
+              <th>Tokens (in/out)</th>
+              <th>Cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Object.entries(by_route).map(([route, stats]) => (
+              <tr key={route}>
+                <td className="admin-table__email">{route}</td>
+                <td className="admin-table__num">{stats.run_count}</td>
+                <td className="admin-table__num">{fmtMs(stats.p50_latency_ms)}</td>
+                <td className="admin-table__num">{fmtMs(stats.p95_latency_ms)}</td>
+                <td className="admin-table__num">{stats.prompt_tokens.toLocaleString()} / {stats.completion_tokens.toLocaleString()}</td>
+                <td className="admin-table__num">{fmtCost(stats.total_cost_usd)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <h3 className="admin-subheading">Avg latency per node</h3>
+      <div className="admin-table-wrap">
+        <table className="admin-table">
+          <thead>
+            <tr>
+              <th>Node</th>
+              <th>Avg latency per run</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Object.entries(avg_node_latency_ms)
+              .sort((a, b) => b[1] - a[1])
+              .map(([node, ms]) => (
+                <tr key={node}>
+                  <td className="admin-table__email">{node}</td>
+                  <td className="admin-table__num">{fmtMs(ms)}</td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Profile tab ────────────────────────────────────────────── */
 
 function ProfileTab() {
@@ -252,6 +379,7 @@ function ProfileTab() {
 
 const TABS = [
   { id: 'Users',   icon: '👤' },
+  { id: 'Metrics', icon: '📊' },
   { id: 'Config',  icon: '⚙' },
   { id: 'Profile', icon: '🔑' },
 ];
@@ -286,6 +414,7 @@ export default function AdminPage() {
 
       <main className="admin-main">
         {tab === 'Users'   && <UsersTab />}
+        {tab === 'Metrics' && <MetricsTab />}
         {tab === 'Config'  && <ConfigTab />}
         {tab === 'Profile' && <ProfileTab />}
       </main>

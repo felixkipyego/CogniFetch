@@ -31,7 +31,12 @@ def _llm(streaming: bool = False, tools=None):
     api_key = runtime_config.get("api_key") or settings.api_key
     base_url = runtime_config.get("openai_api_base") or settings.openai_api_base
     model = runtime_config.get("llm_model") or settings.llm_model
-    client = ChatOpenAI(model=model, streaming=streaming, api_key=api_key, base_url=base_url)
+    # stream_usage=True: without it, OpenAI's streaming API omits token usage
+    # entirely, and the metrics-capture in app/chat/agent/runner.py would
+    # silently undercount every streamed call. No-op for non-streaming calls.
+    client = ChatOpenAI(
+        model=model, streaming=streaming, api_key=api_key, base_url=base_url, stream_usage=True
+    )
     return client.bind_tools(tools) if tools else client
 
 

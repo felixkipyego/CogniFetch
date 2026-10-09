@@ -1,7 +1,7 @@
 import enum
 import uuid
 
-from sqlalchemy import Boolean, Column, Enum, ForeignKey, String, Text, DateTime, func
+from sqlalchemy import Boolean, Column, Enum, Float, ForeignKey, Integer, String, Text, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 from app.db.base import Base
@@ -68,3 +68,31 @@ class ChatMessage(Base):
     cited_chunk_ids = Column(JSONB, nullable=True)   # list of chunk ID strings
     handled_by = Column(String(64), nullable=True)   # which sub-agent produced this message
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AgentRunMetric(Base):
+    """
+    One row per completed agent turn — real chat traffic and eval harness
+    runs alike (eval runs use a fixed eval user, so they show up as their own
+    slice of the admin aggregates rather than being special-cased out).
+
+    Deliberately not foreign-keyed to chat_sessions/chat_messages: keeping
+    this table write-only and decoupled means the eval harness (which has no
+    real ChatSession/ChatMessage rows) can write here with zero extra setup,
+    and deleting a session/message never needs to cascade here.
+    """
+    __tablename__ = "agent_run_metrics"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    session_id = Column(UUID(as_uuid=True), nullable=True)
+    message_id = Column(UUID(as_uuid=True), nullable=True)
+    handled_by = Column(String(64), nullable=True)
+    prompt_tokens = Column(Integer, nullable=False, default=0)
+    completion_tokens = Column(Integer, nullable=False, default=0)
+    # Null when the configured model isn't in app/metrics/pricing.py's table —
+    # an unpriced model should show up as "unknown" in aggregates, never as 0.
+    cost_usd = Column(Float, nullable=True)
+    node_latencies_ms = Column(JSONB, nullable=True)  # {node_name: total_ms}
+    total_latency_ms = Column(Float, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)

@@ -19,7 +19,10 @@ def _llm(streaming: bool = False):
     api_key = runtime_config.get("api_key") or settings.api_key
     base_url = runtime_config.get("openai_api_base") or settings.openai_api_base
     model = runtime_config.get("llm_model") or settings.llm_model
-    return ChatOpenAI(model=model, streaming=streaming, api_key=api_key, base_url=base_url)
+    # stream_usage=True: see app/chat/agent/nodes.py's _llm for why this is needed.
+    return ChatOpenAI(
+        model=model, streaming=streaming, api_key=api_key, base_url=base_url, stream_usage=True
+    )
 
 
 def _format_per_document(document_id: str, docs: list) -> str:

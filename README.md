@@ -17,7 +17,7 @@ Upload PDFs, Word documents, plain text, or HTML. Ask questions. Get answers gro
 | Backend (this README) | FastAPI · LangGraph · pgvector · MinIO | `docker-compose up` |
 | Frontend | React 18 · Vite · React Router | [`frontend/README.md`](frontend/README.md) |
 
-**Included out of the box:** JWT auth with refresh tokens · Email verification · Multi-agent orchestration (supervisor + RAG/web-research/multi-doc-synthesis sub-agents) · SSE streaming · Admin panel (swap model/API key at runtime without restart) · Full pytest suite · One-command Docker Compose setup · Works with any OpenAI-compatible provider
+**Included out of the box:** JWT auth with refresh tokens · Email verification · Multi-agent orchestration (supervisor + RAG/web-research/multi-doc-synthesis sub-agents) · SSE streaming · Admin panel (swap model/API key at runtime without restart, token/cost/latency metrics) · Golden-set eval harness with LLM-as-judge scoring · Full pytest suite · One-command Docker Compose setup · Works with any OpenAI-compatible provider
 
 ---
 
@@ -118,6 +118,7 @@ This applies all migrations:
 - `0004` — adds `is_admin` to users, creates `system_config` table
 - `0005` — adds `is_verified` and `email_token` to users (email verification)
 - `0006` — adds `handled_by` to chat_messages (multi-agent sub-agent attribution)
+- `0007` — creates `agent_run_metrics` table (tokens, cost, per-node latency per agent run)
 
 The MinIO bucket (`cognifetch-docs`) is created automatically on first API startup.
 
@@ -234,6 +235,10 @@ The test suite:
 - **`test_documents`** — upload, list (user-scoped), get, wrong-owner 404, delete; S3 and background ingestion are mocked
 - **`test_ingestion`** — unit tests for `_run_pipeline` (chunking, metadata tagging) and `ingest_document_task` status transitions, including the retry-then-succeed and permanent-failure paths; LangChain, S3, and Celery's broker are not needed (`Task.apply()` runs the task in-process)
 - **`test_chat`** — session CRUD, message history, SSE stream structure, message persistence after streaming, supervisor routing per sub-agent, and the RAG-to-web-research escalation path; LangGraph/LLM calls are mocked
+- **`test_evals`** — retrieval precision/recall math (deterministic, no LLM), the three LLM-as-judge functions (mocked `ChatOpenAI`), and scorecard aggregation — the eval harness's own scoring logic, independent of the live-stack run it's normally used with
+- **`test_admin`** — `/admin/metrics` aggregation: route breakdown, unknown-cost handling, admin-only access
+
+Separately, `python -m app.evals.run` (or `make eval`) runs the full golden eval set against the live graph with real LLM calls — this is an operational tool, not part of the pytest suite (it costs money and needs the dockerized stack up). See "Evaluation" below.
 
 ---
 
@@ -246,10 +251,18 @@ app/
 ├── celery_app.py        # Celery app (Redis broker/backend)
 ├── dependencies.py      # get_db, get_current_user, get_s3_client
 ├── auth/                # JWT register / login / refresh / password change
-├── admin/               # System config panel (API key, model settings)
+├── admin/               # System config panel (API key, model settings, metrics)
+├── metrics/             # Token/cost/latency recording + admin aggregation
+│   ├── service.py       # record_agent_run, get_metrics_summary
+│   └── pricing.py        # Best-effort $/1M-token table for known OpenAI models
 ├── documents/           # Upload, CRUD, S3 storage, async ingestion
 │   ├── ingestion.py     # load → split → embed → pgvector upsert (pure pipeline, no Celery)
 │   └── tasks.py         # Celery task: retries + idempotent re-run around ingestion.py
+├── evals/               # Golden-set evaluation harness (Phase 3) — see "Evaluation" below
+│   ├── runner.py        # Bootstraps eval user/corpus, runs each case, scores it
+│   ├── scoring.py        # Retrieval precision/recall + 3 LLM-as-judge functions
+│   ├── schemas.py        # EvalCase, judgment models, ScoreCard
+│   └── run.py            # CLI entry: python -m app.evals.run
 └── chat/
     ├── router.py        # SSE streaming endpoint
     ├── service.py       # Session + message persistence
@@ -260,6 +273,7 @@ app/
         ├── nodes.py        # generate_query_or_respond, rewrite_question, generate_answer, no_relevant_docs
         ├── edges.py        # grade_documents conditional edge
         ├── retriever.py    # pgvector retriever(s) scoped per session + user
+        ├── runner.py       # Shared astream_events consumer: tokens, citations, handled_by, latency, tokens
         ├── schemas.py      # AgentState, OrchestratorState, RouteDecision, etc.
         └── subagents/
             ├── web_research.py        # Tavily search + answer sub-agent
@@ -312,6 +326,48 @@ TAVILY_API_KEY=your-tavily-api-key
 ```
 
 Get a free key at [tavily.com](https://tavily.com) (1,000 searches/month, no credit card required). Unlike `LANGCHAIN_API_KEY` above, this isn't silently inert when unset — the Tavily client itself raises if asked to search without a key. The web-research sub-agent checks for the key before calling Tavily and replies that web research isn't configured instead of raising, so the app works fully without this key — out-of-corpus questions just get a "not configured" response rather than a real web answer.
+
+---
+
+## Evaluation
+
+A 25-case golden set (`eval/qa_pairs.json`, frozen fixtures described in `eval/README.md`) runs against the live orchestrator graph with real LLM calls — no mocking — and scores four dimensions: retrieval precision/recall (deterministic, page-overlap based), answer correctness, faithfulness, and citation accuracy (the latter three via LLM-as-judge, same structured-output pattern as `grade_documents`).
+
+```bash
+make eval
+# or: python -m app.evals.run
+```
+
+**Latest run** (2026-10-09, `gpt-4o-mini` via a third-party gateway, Tavily not configured):
+
+| Route | n | Correctness | Faithfulness |
+|---|---|---|---|
+| `rag` | 18 | **100%** | **94%** |
+| `multi_doc_synthesis` | 3 | **100%** | **100%** |
+| `web_research` (unavailable) | 4 | 25% | 75% |
+| **Overall** | 25 | 88% | 92% |
+
+Citation accuracy: 95% (over cases that cited anything). Mean retrieval precision/recall: 0.46 / 0.92.
+
+**Reading these numbers honestly, not just reporting them:**
+
+- **RAG and multi-doc synthesis are effectively flawless on this corpus.** Every drag on the overall score comes from the 4-case `web_research` bucket, for two separate reasons below — not from retrieval or generation quality.
+- **Reason 1 — expected:** `TAVILY_API_KEY` isn't set in this environment (see "Multi-agent orchestration" above), so genuinely out-of-corpus questions get a "web search not configured" response instead of a real answer. The correctness judge scores that as wrong wording against the expected refusal text, even though it isn't a hallucination.
+- **Reason 2 — a real finding the harness caught that manual spot-checking wouldn't have:** 2 of the 4 `web_research` cases (`aurora-03`, `trailhead-02`) are genuinely in-corpus questions the supervisor misrouted away from `rag`. Both ask ambiguous-sounding, generic-seeming questions ("what's the rate limit for the Pro tier", "is a credit card required for the free trial") that read like they could be about any SaaS product in general, not specifically the uploaded document — and unlike Phase 2's "unrecognized company name" misrouting bug (already fixed in the supervisor prompt), this one isn't a clean deterministic logic error: `trailhead-02` explicitly names "Trailhead Analytics" in the question, yet still misrouted, while 4 other Trailhead questions routed correctly. That points to run-to-run classifier noise (no sub-agent LLM call in this codebase sets `temperature=0`) rather than a one-line prompt fix — exactly the kind of regression a single live demo question would never surface, which is the entire point of having an automated eval set. Not fixed in this phase; a candidate next step is pinning `temperature=0` on the supervisor's classifier or adding few-shot examples of ambiguous in-corpus phrasing.
+- **Mean retrieval precision (0.46) is a citation-granularity artifact, not a relevance problem.** Recall is 0.92 — the correct page is almost always retrieved. Precision sits near 0.5 on nearly every single-fact case because `cited_chunk_ids` (and this harness's retrieval scoring) records *every* page retrieved from a cited document, and MMR's `k=10` against this corpus's 2-page documents pulls chunks from both pages even when only one answers the question. This is a real, measurable characteristic of the current citation mechanism's granularity — worth narrowing in a future pass (e.g. report only the page(s) the final answer's text actually draws from) — not evidence that retrieval itself is missing the right page.
+- One harder case, `out-of-corpus-02` (the "Northwind dress code" grounding trap — see `eval/README.md`), ended up with a citation despite the final answer coming from the unavailable web-research path; `citation_accuracy` correctly flagged it as `unsupported`. The root cause (a stale citation surviving the escalation handoff) wasn't fully isolated — but this is precisely the class of regression citation-accuracy scoring exists to catch instead of missing silently.
+
+Token/cost/latency are recorded per agent run (`agent_run_metrics` table) and aggregated at `GET /admin/metrics` (Users → Metrics tab in the admin panel) — see "Token, cost & latency metrics" below.
+
+Below 70% correctness or 85% faithfulness, `python -m app.evals.run` exits non-zero — documented here as a pre-merge gate rather than wired into CI, since a real run costs money and needs the live stack up.
+
+---
+
+## Token, cost & latency metrics
+
+Every completed agent turn — real chat traffic and eval harness runs alike — writes one row to `agent_run_metrics`: prompt/completion tokens, a best-effort cost estimate (`app/metrics/pricing.py` — a static $/1M-token table for a handful of known OpenAI models; an unpriced or gateway-routed model reports cost as unknown, never as $0, same honesty bar as `eval/BASELINE.md`'s Phase 0 cost caveat), per-node latency, and total latency.
+
+`GET /admin/metrics` aggregates the most recent 200 runs — overall stats, a breakdown by `handled_by` (which sub-agent answered), and average latency per graph node — surfaced in the admin panel's **Metrics** tab.
 
 ---
 

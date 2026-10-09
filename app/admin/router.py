@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.admin import schemas, service
 from app.db.models import User
 from app.dependencies import get_current_admin_user, get_db
+from app.metrics.service import get_metrics_summary
 
 router = APIRouter()
 
@@ -52,3 +53,11 @@ async def patch_config(
     _: User = Depends(get_current_admin_user),
 ):
     return await service.patch_config(db, body.changes)
+
+
+@router.get("/metrics", response_model=schemas.MetricsSummaryOut)
+async def get_metrics(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin_user),
+):
+    return await get_metrics_summary(db)
